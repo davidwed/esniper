@@ -94,7 +94,7 @@ then
 fi
 
 echo Pushing all changes to upstream. Hopefully no conflicts occur.
-echo git push --tags || exit 6
+git push --tags || exit 6
 
 echo Creating source tar file ${CURRFILE}.tgz
 
@@ -133,4 +133,4 @@ touch configure Makefile.in
 git add --force configure Makefile.in
 
 git commit -m "$CURRENT new version number for development version"
-echo git push --tags || exit 8
+git push --tags || exit 8
