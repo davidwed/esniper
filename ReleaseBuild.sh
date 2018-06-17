@@ -14,6 +14,7 @@ MAJOR="$1"
 MINOR="$2"
 STEP="$3"
 CURRENT=$MAJOR.$MINOR.$STEP
+DEVVERSION=$MAJOR.$MINOR.$(expr $STEP + 1)
 CURRFILE=esniper-$MAJOR-$MINOR-$STEP
 CURRTAG=Version_${MAJOR}_${MINOR}_${STEP}
 
@@ -34,7 +35,7 @@ read line
 echo Creating ReleaseNote and README file from ChangeLog.
 
 awk 'BEGIN {empty=0;stop=0;buffer="";}
-/^[     ]*$/ {
+/^[	 ]*$/ {
   empty=1;
   if(!stop && length(buffer)) printf "%s", buffer;
   buffer = "";
@@ -43,7 +44,7 @@ awk 'BEGIN {empty=0;stop=0;buffer="";}
     if(!empty) print;
     else {
       buffer = buffer $0 "\n";
-      if(match($0, /\* [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]* released/)) stop=1;
+      if(match($0, /\* [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]* .* released/)) stop=1;
     }
   }
 }' ChangeLog > ReleaseNote
@@ -118,3 +119,18 @@ cp esniper.1 esniper_man.html misc.mk $CURRFILE
 cp sample_auction.txt sample_config.txt $CURRFILE
 cp frontends/README frontends/snipe $CURRFILE/frontends
 tar cvf - $CURRFILE | gzip >$CURRFILE.tgz
+
+
+perl -i.bak -p -e 's/(AC_INIT\(esniper),.*\)/\1,'${DEVVERSION}')/' configure.ac
+git add configure.ac
+
+make || exit 7
+sleep 2
+touch aclocal.m4 Makefile.am
+git add --force aclocal.m4 Makefile.am
+sleep 2
+touch configure Makefile.in
+git add --force configure Makefile.in
+
+git commit -m "$CURRENT new version number for development version"
+echo git push --tags || exit 8
