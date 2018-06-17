@@ -1,5 +1,10 @@
+2018-06-17
+	* 2.35.0 released
+	* bug fixes for #757, #756, #746, #737, #736, #733, #725,
+	  #724, #723, #721, #720, #716
+
 2018-04-25
-	* 2.34.0 released
+	* 2.34.0 not released
 	* adapt automake files to newer syntax
 	* adapt release script to Git repo
 	* bug fixes for #746, #737, #736, #733, #725, #724, #723,
