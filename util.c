@@ -297,10 +297,12 @@ checkVersion(void)
 {
 	static int result = -1;
 	static char *newVersion = NULL;
+	static const char *thisVersion = NULL;
 
 	if (result == -1) {
 		int i;
 		memBuf_t *mp = httpGet(ESNIPER_VERSION_URL, NULL);
+		thisVersion = getVersion();
 
 		/* not available */
 		if (mp == NULL)
@@ -309,11 +311,35 @@ checkVersion(void)
 		for (i = 0; newVersion[i] && newVersion[i] != '\n'; ++i)
 			;
 		newVersion[i] = '\0';
-		result = !strcmp(getVersion(), newVersion);
+		result = !strcmp(thisVersion, newVersion);
 		/* Don't use freeMembuf(), it will also free
 		 * mp->memory, which we are using.
+		 * This memory leak is acceptable because it's done only once.
 		 */
 		free(mp);
+		/* if the version is different, check for newer version */
+		if(!result) {
+			const char *newVerPart = newVersion;
+			const char *thisVerPart = thisVersion;
+			char *endptr;
+			long newNum, thisNum;
+			int i;
+			for(i = 0; i < 3; i++) {
+				newNum = strtol(newVerPart, &endptr, 10);
+				for(newVerPart = endptr; *newVerPart && !isdigit(*newVerPart); newVerPart++);
+				thisNum = strtol(thisVerPart, &endptr, 10);
+				for(thisVerPart = endptr; *thisVerPart && !isdigit(*thisVerPart); thisVerPart++);
+				if(thisNum < newNum) {
+					/* This version is older. */
+					break;
+				}
+				if(thisNum > newNum) {
+					/* This version is newer - fine. */
+					result = 1;
+					break;
+				}
+			}
+		}
 	}
 	return result ? NULL : newVersion;
 }
