@@ -658,7 +658,8 @@ ebayLogin(auctionInfo *aip, time_t interval)
 		else if (pp->pageName &&
 				(!strcmp(pp->pageName, "Welcome to eBay") ||
 				 !strcmp(pp->pageName, "Welcome to eBay - Sign in - Error") ||
-				 !strcmp(pp->pageName, "Welcome to eBay - Error")))
+				 !strcmp(pp->pageName, "Welcome to eBay - Error") ||
+				 !strcmp(pp->pageName, "Sign in or Register | eBay - Error")))
 			ret = auctionError(aip, ae_badpass, NULL);
 		else if (pp->pageName && !strcmp(pp->pageName, "PageSignIn"))
 			ret = auctionError(aip, ae_login, NULL);
