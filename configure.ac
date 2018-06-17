@@ -1,4 +1,4 @@
-AC_INIT(esniper,2.35.0)
+AC_INIT(esniper,2.35.1)
 AC_CONFIG_SRCDIR(esniper.c)
 AM_INIT_AUTOMAKE
 
