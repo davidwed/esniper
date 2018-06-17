@@ -31,7 +31,7 @@ displayed in all child directories.
 Copy other files to sourceforge:
 
 	scp sample* esniper.1 esniper_man.html version.txt index.html \
-		esniper,esniper@web.sf.net:htdocs
+		username,esniper@web.sf.net:htdocs
 
 Send email to esniper-announce@lists.sourceforge.net to announce the new 
 version. This list is moderated, so you might have to accept the message
