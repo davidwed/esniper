@@ -161,13 +161,14 @@ httpRequest(const char *url, const char *logUrl, const char *data, const char *l
 	if ((curlrc = curl_easy_setopt(easyhandle, CURLOPT_FILE, (void *)mp)))
 		return httpRequestFailed(mp);
 
+	if ((curlrc = curl_easy_setopt(easyhandle, CURLOPT_POSTFIELDS, nonNullData)))
+               return httpRequestFailed(mp);
+
 	if (rt == GET) {
-		if ((curlrc = curl_easy_setopt(easyhandle, CURLOPT_HTTPGET, 1)))
+		if ((curlrc = curl_easy_setopt(easyhandle, CURLOPT_HTTPGET, 1L)))
 			return httpRequestFailed(mp);
 	} else {
 		log(("%s", logData ? logData : nonNullData));
-		if ((curlrc = curl_easy_setopt(easyhandle, CURLOPT_POSTFIELDS, nonNullData)))
-			return httpRequestFailed(mp);
 	}
 
 	log(("%s", logUrl ? logUrl : url));
