@@ -80,6 +80,7 @@ option_t options = {
 	NULL,		/* auction file */
 	1,		/* bid */
 	1,		/* reduce quantity */
+	1,		/* winning priority */
 	0,		/* debug */
 	0,		/* usage */
 	0,		/* info on given auctions only */
@@ -138,6 +139,8 @@ optionTable_t optiontab[] = {
    {NULL,       "f", (void*)&options.auctfilename, OPTION_STRING,  LOG_NORMAL, &CheckAuctionFile, 0},
    {"reduce",  NULL, (void*)&options.reduce,       OPTION_BOOL,    LOG_NORMAL, NULL, 0},
    {NULL,       "r", (void*)&options.reduce,       OPTION_BOOL_NEG,LOG_NORMAL, NULL, 0},
+   {"winprior", NULL,(void*)&options.winprior,     OPTION_BOOL,    LOG_NORMAL, NULL, 0},
+   {NULL,       "w", (void*)&options.winprior,     OPTION_BOOL_NEG,LOG_NORMAL, NULL, 0},
    {"bid",     NULL, (void*)&options.bid,          OPTION_BOOL,    LOG_NORMAL, NULL, 0},
    {NULL,       "n", (void*)&options.bid,          OPTION_BOOL_NEG,LOG_NORMAL, NULL, 0},
    {NULL,       "m", (void*)&options.myitems,      OPTION_BOOL,    LOG_NORMAL, NULL, 0},
@@ -497,7 +500,7 @@ printVersion(void)
 }
 
 static const char usageSummary[] =
- "usage: %s [-bdhHnmPrUv] [-c conf_file] [-l logdir] [-p proxy] [-q quantity]\n"
+ "usage: %s [-bdhHnmPrUvw] [-c conf_file] [-l logdir] [-p proxy] [-q quantity]\n"
  "       [-s secs|now] [-u user] [-D delay] (auction_file | [auction price ...])\n"
  "\n";
 
@@ -531,6 +534,7 @@ static const char usageLong2[] =
  "-U: prompt for ebay username\n";
 static const char usageLong3[] =
  "-v: print version and exit\n"
+ "-w: do not sort winning auctions first\n"
  "\n"
  "You must specify an auction file or <auction> <price> pair[s].  Options\n"
  "on the command line override settings in auction and configuration files.\n";
@@ -543,6 +547,7 @@ static const char usageConfig1[] =
  "    bid = true\n"
  "    debug = false\n"
  "    reduce = true\n"
+ "    winprior = true\n"
  "  String:\n"
  "    logdir = .\n"
  "    password =\n"
@@ -596,7 +601,7 @@ main(int argc, char *argv[])
 	int XFlag = 0;
 
 	/* all known options */
-	static const char optionstring[]="bc:dhHil:mnp:Pq:rs:u:UvX";
+	static const char optionstring[]="bc:dhHil:mnp:Pq:rs:u:UvwX";
 
 	atexit(cleanup);
 	progname = basename(argv[0]);
@@ -758,6 +763,7 @@ main(int argc, char *argv[])
 		case 'n': /* don't bid */
 		case 'P': /* read password */
 		case 'r': /* reduce */
+		case 'w': /* winprior */
 		case 'U': /* read username */
 			if (parseGetoptValue(c, NULL, optiontab))
 				options.usage |= USAGE_SUMMARY;
@@ -782,6 +788,7 @@ main(int argc, char *argv[])
 	log(("options.auctfilename=%s\n", nullStr(options.auctfilename)));
 	log(("options.bid=%d\n", options.bid));
 	log(("options.reduce=%d\n", options.reduce));
+	log(("options.winprior=%d\n", options.winprior));
 	log(("options.debug=%d\n", options.debug));
 	log(("options.usage=%d\n", options.usage));
 	log(("options.info=%d\n", options.info));
