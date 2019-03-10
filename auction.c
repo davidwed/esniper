@@ -40,6 +40,8 @@
 #include <string.h>
 #include <sys/types.h>
 #include <time.h>
+#include <curl/curl.h>
+#include <curl/easy.h>
 #if defined(WIN32)
 #	define strcasecmp(s1, s2) stricmp((s1), (s2))
 #	define sleep(t) _sleep((t) * 1000)
@@ -63,9 +65,14 @@ typedef struct _headerattr
   int   direction;
   int   mandatory;
   char* value;
-} headerAttr_t, headerVal_t;
+} headerAttr_t, headerVal_t, jsonVal_t;
 
-typedef enum searchType { st_attribute, st_value } searchType_t;
+typedef enum searchType { st_attribute, st_value, st_json } searchType_t;
+
+typedef struct _transfercontent
+{
+  int dest, src, escape;
+} transfercontent_t;
 
 static time_t loginTime = 0;	/* Time of last login */
 static time_t defaultLoginInterval = 12 * 60 * 60;	/* ebay login interval */
@@ -404,12 +411,51 @@ parsePreBid(memBuf_t *mp, auctionInfo *aip)
 	return ret;
 }
 
-static const char LOGIN_1_URL[] = "https://%s/ws/eBayISAPI.dll?SignIn";
-static const char LOGIN_2_URL[] = "https://%s/ws/eBayISAPI.dll?co_partnerId=2&siteid=0&UsingSSL=1";
-static const char LOGIN_DATA[] = "rqid=%s&lkdhjebhsjdhejdshdjchquwekguid=%s&refId=&regUrl=%s&MfcISAPICommand=SignInWelcome&bhid=DEF_CI&UsingSSL=1&inputversion=2&lse=false&lsv=&mid=%s&kgver=1&kgupg=1&kgstate=&omid=&hmid=&rhr=f&srt=%s&siteid=0&co_partnerId=2&ru=&pp=&pa1=&pa2=&pa3=&i1=-1&pageType=-1&rtmData=&usid=%s&afbpmName=sess1&kgct=&userid_otp=&sgnBt=Continue&otp=&keepMeSignInOption3=1&userid=%s&%s=%s&runId2=%s&%s=%s&pass=%s&keepMeSignInOption2=1&keepMeSignInOption=1&htmid=&kdata=";
+static const char LOGIN_1_URL[] = "https://%s";
+static const char LOGIN_2_URL[] = "https://%s";
 
-static const char* id="id=\"";
+/* Parameter interpretation
+ * ------------------------
+ * i1        : ? (= '')
+ * pageType  : ? (= '-1')
+ * rqid      : <rqid from html source>
+ * lkd..guid : rqid or <lkd..guid from html source>
+ * mid       : <mid from globalDfpContext>
+ * srt       : <srt from html source>%257Cht5new%253Dfalse%2526usid%253D<usid> (currently <srt from html source>)
+ * rtmData   : ? (= 'PS%3DT.0')
+ * usid      : <session_id from globalDfpContext>
+ * .         : ?
+ * .         : ?
+ * userid    : Your ebay username
+ * pass      : Your ebay password 
+ * kmsi      : Keep me signed in (= '1')
+ * rdrlog    : %7B%22fp%22%3A%22%22%2C%22prfdcscmd%22%3A%22<rqid>%22%2C%22iframe%22%3Afalse%2C%22timestamp%22%3A<timestamp utc><mmm>%7D (currently empty)
+ */
+
+static const char LOGIN_DATA[] = "i1=&\
+pageType=-1&\
+rqid=%s&\
+lkdhjebhsjdhejdshdjchquwekguid=%s&\
+mid=%s&\
+srt=%s&\
+rtmData=PS%%3DT.0&\
+usid=%s&\
+htmid=&\
+fypReset=&\
+ICurl=&\
+src=&\
+AppName=&\
+srcAppId=&\
+errmsg=&\
+defaultKmsi=true&\
+userid=%s&\
+pass=%s&\
+kmsi=1&\
+rdrlog=";
+
+static const char* id1="id=\"";
 static const char* id2="value=\"";
+static const char* id3=":\"";
 
 static const int USER_NUM=0;
 static const int PASS_NUM=1;
@@ -422,8 +468,8 @@ static const int SRT=4;
 static const int USID=5;
 static const int RUNID2=6;
 
-static headerAttr_t headerAttrs[] = {"<label for=\"userid\"", 1, 1, 1, NULL,
-                            "\"password\"", 1, -1, 1, NULL};
+static headerAttr_t headerAttrs[] = {"<label for=\"userid\"", 1, 1, 0, NULL,
+                            "\"password\"", 1, -1, 0, NULL};
 
 static headerVal_t headerVals[] = {"rqid", 1, 1, 1, NULL,
                            "lkdhjebhsjdhejdshdjchquwekguid", 1, 1, 1, NULL,
@@ -432,6 +478,12 @@ static headerVal_t headerVals[] = {"rqid", 1, 1, 1, NULL,
                            "srt", 1, 1, 1, NULL,
                            "usid", 1, 1, 1, NULL,
                            "runId2", 1, 1, 0, NULL};
+
+static jsonVal_t globalDfpContext[] = {"\"mid\"", 1, 1, 1, NULL,
+			   "\"tmxSessionId\"", 1, 1, 1, NULL};
+
+static transfercontent_t transfercontent[] = { 3, 0, 1,
+			   5, 1, 0};
 
 static int
 signinFormSearch(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t searchfor)
@@ -445,8 +497,10 @@ signinFormSearch(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t
 
 	if(searchfor == st_attribute)
 		strcpy(pattern, searchdef->name);
-	else
+	else if(searchfor == st_value)
 		sprintf(pattern, "name=\"%s\"", searchdef->name);
+	else
+		strcpy(pattern, searchdef->name);
 
 	for(i = 0; i < searchdef->occurence; i++) {
 		search = strstr(start, pattern);
@@ -463,9 +517,9 @@ signinFormSearch(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t
 	while(src != search && end != search ) {
                 search += (searchdef->direction);
 
-		if(!strncmp(search, (searchfor == st_attribute ? id : id2), 
-                                       (searchfor == st_attribute ? strlen(id) : strlen(id2))) ) {
-			search += (searchfor == st_attribute ? strlen(id) : strlen(id2));
+		if(!strncmp(search, (searchfor == st_attribute ? id1 : (searchfor == st_value ? id2 : id3)), 
+                                       (searchfor == st_attribute ? strlen(id1) : (searchfor == st_value ? strlen(id2) : strlen(id3)) ) ) ) {
+			search += (searchfor == st_attribute ? strlen(id1) : strlen(id2));
 			memset(res, '\0', sizeof(res));
 			for(i = 0; (*search) != '"' && i < sizeof(res); res[i++] = *search++);
 			searchdef->value = (char *)myMalloc(strlen(res) + 1);
@@ -481,6 +535,9 @@ signinFormSearch(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t
         {
             searchdef->value = (char *)myMalloc(1);
             strncpy(searchdef->value, "\0", 1);
+            if (options.debug)
+               dlog("%s(): %s=%s", (searchfor == st_attribute ? "findAttr" : "searchvalue"),
+                       searchdef->name, searchdef->value);
             return searchdef->mandatory;
         }
 	return searchdef->mandatory;
@@ -497,6 +554,13 @@ getVals(char* src, size_t srcLen, headerVal_t* vals)
 {
 	return signinFormSearch(src, srcLen, vals, st_value);
 }
+
+static int
+getJson(char* src, size_t srcLen, jsonVal_t* vals)
+{
+        return signinFormSearch(src, srcLen, vals, st_json);
+}
+
 
 /*
  * Force an ebay login.
@@ -551,11 +615,33 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	for(i = 0; i < sizeof(headerAttrs)/sizeof(headerAttr_t); i++)
 		if(findAttr(mp->memory, mp->size, &headerAttrs[i]))
 			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
-				"findAttr cannot find %s", headerAttrs[i].name);
+				"findAttr cannot find %s (headerAttrs)", headerAttrs[i].name);
 	for(i = 0; i < sizeof(headerVals)/sizeof(headerVal_t); i++)
 		if(getVals(mp->memory, mp->size, &headerVals[i]))
 			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
-				"getVals cannot find %s", headerVals[i].name);
+				"getVals cannot find %s (headerVals)", headerVals[i].name);
+	for(i = 0; i < sizeof(globalDfpContext)/sizeof(jsonVal_t); i++)
+                if(getJson(mp->memory, mp->size, &globalDfpContext[i]))
+                        bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
+                                "getJson cannot find %s (globalDfpContext)", globalDfpContext[i].name);
+
+	// Transfer json
+	for(i = 0; i < sizeof(transfercontent)/sizeof(transfercontent_t); i++)
+		if( strlen(headerVals[transfercontent[i].dest].value) == 0 ) {
+			free(headerVals[transfercontent[i].dest].value);
+			if( transfercontent[i].escape > 0 ) {
+				data = curl_escape(globalDfpContext[transfercontent[i].src].value, 0);
+				headerVals[transfercontent[i].dest].value = (char*)myMalloc(strlen(data) + 1);
+				strcpy(headerVals[transfercontent[i].dest].value, data);
+				curl_free(data);
+			}
+			else {
+				headerVals[transfercontent[i].dest].value = (char*)myMalloc(strlen(globalDfpContext[transfercontent[i].src].value) + 1);
+				strcpy(headerVals[transfercontent[i].dest].value, globalDfpContext[transfercontent[i].src].value);
+			}
+                        if (options.debug)
+                                dlog("%s copied", headerVals[transfercontent[i].dest].value); 
+		}
 
 	freeMembuf(mp);
 	mp = NULL;
@@ -565,60 +651,40 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	url = (char *)myMalloc(urlLen);
 	sprintf(url, LOGIN_2_URL, options.loginHost);
 	data = (char *)myMalloc(	sizeof(LOGIN_DATA)
-                                      + strlen(headerAttrs[USER_NUM].value)
-                                      + strlen(headerAttrs[PASS_NUM].value)
-                                      + strlen(options.usernameEscape) * 2
-                                      + strlen(password) * 2
+                                      + strlen(options.usernameEscape)
+                                      + strlen(password)
                                       + strlen(headerVals[RQID].value)
                                       + strlen(headerVals[GUID].value)
-                                      + strlen(headerVals[REGURL].value)
                                       + strlen(headerVals[MID].value)
                                       + strlen(headerVals[SRT].value)
                                       + strlen(headerVals[USID].value)
-                                      + strlen(headerVals[RUNID2].value)
-				      - (11*2)
+				      - (7*strlen("%s"))
                                       );
 	logdata = (char *)myMalloc(	sizeof(LOGIN_DATA)
-                                      + strlen(headerAttrs[USER_NUM].value)
-                                      + strlen(headerAttrs[PASS_NUM].value) 
-                                      + strlen(options.usernameEscape) * 2
-                                      + 5 * 2
+                                      + strlen(options.usernameEscape)
+                                      + 5
                                       + strlen(headerVals[RQID].value)
                                       + strlen(headerVals[GUID].value)
-                                      + strlen(headerVals[REGURL].value)
                                       + strlen(headerVals[MID].value)
                                       + strlen(headerVals[SRT].value)
                                       + strlen(headerVals[USID].value)
-                                      + strlen(headerVals[RUNID2].value)
-				      - (11*2)
+				      - (7*strlen("%s"))
                                       );
 	sprintf(data, LOGIN_DATA,	headerVals[RQID].value,
 					headerVals[GUID].value,
-					headerVals[REGURL].value,
 					headerVals[MID].value,
 					headerVals[SRT].value,
 					headerVals[USID].value,
 					options.usernameEscape,
-					headerAttrs[USER_NUM].value,
-					options.usernameEscape,
-					headerVals[RUNID2].value,
-                                        headerAttrs[PASS_NUM].value,
-					password,
 					password
 					);
 	freePassword(password);
 	sprintf(logdata, LOGIN_DATA,	headerVals[RQID].value,
 					headerVals[GUID].value,
-					headerVals[REGURL].value,
 					headerVals[MID].value,
 					headerVals[SRT].value,
 					headerVals[USID].value,
 					options.usernameEscape,
-					headerAttrs[USER_NUM].value,
-					options.usernameEscape,
-					headerVals[RUNID2].value,
-                                        headerAttrs[PASS_NUM].value,
-					"*****",
 					"*****"
 					);
 
@@ -628,6 +694,7 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	// Free memory
 	for(i=0; i < sizeof(headerAttrs)/sizeof(headerAttr_t); free(headerAttrs[i++].value));
 	for(i=0; i < sizeof(headerVals)/sizeof(headerVal_t); free(headerVals[i++].value));
+	for(i=0; i < sizeof(globalDfpContext)/sizeof(jsonVal_t); free(globalDfpContext[i++].value));
 	free(url);
 	free(data);
 	free(logdata);
