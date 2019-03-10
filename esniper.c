@@ -67,7 +67,7 @@ static const char DEFAULT_CONF_FILE[] = ".esniper";
 #define DEFAULT_HISTORY_HOST "offer.ebay.com"
 #define DEFAULT_PREBID_HOST "offer.ebay.com"
 #define DEFAULT_BID_HOST "offer.ebay.com"
-#define DEFAULT_LOGIN_HOST "www.ebay.com/signin/s"
+#define DEFAULT_LOGIN_HOST "www.ebay.com"
 #define DEFAULT_MYEBAY_HOST "my.ebay.com"
 
 option_t options = {

@@ -411,8 +411,8 @@ parsePreBid(memBuf_t *mp, auctionInfo *aip)
 	return ret;
 }
 
-static const char LOGIN_1_URL[] = "https://%s";
-static const char LOGIN_2_URL[] = "https://%s";
+static const char LOGIN_1_URL[] = "https://%s/signin/s";
+static const char LOGIN_2_URL[] = "https://%s/signin/s";
 
 /* Parameter interpretation
  * ------------------------
@@ -421,7 +421,7 @@ static const char LOGIN_2_URL[] = "https://%s";
  * rqid      : <rqid from html source>
  * lkd..guid : rqid or <lkd..guid from html source>
  * mid       : <mid from globalDfpContext>
- * srt       : <srt from html source>%257Cht5new%253Dfalse%2526usid%253D<usid> (currently <srt from html source>)
+ * srt       : <srt from html source>%257Cht5new%253Dfalse%2526usid%253D<usid>
  * rtmData   : ? (= 'PS%3DT.0')
  * usid      : <session_id from globalDfpContext>
  * .         : ?
@@ -437,7 +437,7 @@ pageType=-1&\
 rqid=%s&\
 lkdhjebhsjdhejdshdjchquwekguid=%s&\
 mid=%s&\
-srt=%s&\
+srt=%s%%257Cht5new%%253Dfalse%%2526usid%%253D%s&\
 rtmData=PS%%3DT.0&\
 usid=%s&\
 htmid=&\
@@ -658,7 +658,8 @@ ebayLogin(auctionInfo *aip, time_t interval)
                                       + strlen(headerVals[MID].value)
                                       + strlen(headerVals[SRT].value)
                                       + strlen(headerVals[USID].value)
-				      - (7*strlen("%s"))
+                                      + strlen(headerVals[USID].value)
+				      - (8*strlen("%s"))
                                       );
 	logdata = (char *)myMalloc(	sizeof(LOGIN_DATA)
                                       + strlen(options.usernameEscape)
@@ -668,12 +669,14 @@ ebayLogin(auctionInfo *aip, time_t interval)
                                       + strlen(headerVals[MID].value)
                                       + strlen(headerVals[SRT].value)
                                       + strlen(headerVals[USID].value)
-				      - (7*strlen("%s"))
+                                      + strlen(headerVals[USID].value)
+				      - (8*strlen("%s"))
                                       );
 	sprintf(data, LOGIN_DATA,	headerVals[RQID].value,
 					headerVals[GUID].value,
 					headerVals[MID].value,
 					headerVals[SRT].value,
+					headerVals[USID].value,
 					headerVals[USID].value,
 					options.usernameEscape,
 					password
@@ -683,6 +686,7 @@ ebayLogin(auctionInfo *aip, time_t interval)
 					headerVals[GUID].value,
 					headerVals[MID].value,
 					headerVals[SRT].value,
+					headerVals[USID].value,
 					headerVals[USID].value,
 					options.usernameEscape,
 					"*****"
