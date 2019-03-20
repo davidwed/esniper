@@ -77,53 +77,25 @@ typedef struct _transfercontent
 static time_t loginTime = 0;	/* Time of last login */
 static time_t defaultLoginInterval = 12 * 60 * 60;	/* ebay login interval */
 
+static size_t placemakerLen = strlen("%s");
+
 static int acceptBid(const char *pagename, auctionInfo *aip);
 static int bid(auctionInfo *aip);
 static int ebayLogin(auctionInfo *aip, time_t interval);
-static int findAttr(char* src, size_t srcLen, headerAttr_t* attr);
+static int findAttr(char* src, size_t srcLen, headerAttr_t* attr, char* label);
 static int forceEbayLogin(auctionInfo *aip);
 static char *getIdInternal(char *s, size_t len);
 static int getInfoTiming(auctionInfo *aip, time_t *timeToFirstByte);
 static int getQuantity(int want, int available);
-static int getVals(char* src, size_t srcLen, headerVal_t* vals);
+static int getJson(char* src, size_t srcLen, jsonVal_t* vals, char* label);
+static int getVals(char* src, size_t srcLen, headerVal_t* vals, char* label);
 static int makeBidError(const pageInfo_t *pageInfo, auctionInfo *aip);
-static int match(memBuf_t *mp, const char *str);
 static int parseBid(memBuf_t *mp, auctionInfo *aip);
 static int preBid(auctionInfo *aip);
+static int parseHtmlSource(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t searchfor, char* label);
 static int parsePreBid(memBuf_t *mp, auctionInfo *aip);
 static int printMyItemsRow(char **row, int printNewline);
-static int signinFormSearch(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t searchfor);
 static int watch(auctionInfo *aip);
-
-/*
- * attempt to match some input, neglecting case, ignoring \r and \n.
- * returns 0 on success, -1 on failure
- */
-static int
-match(memBuf_t *mp, const char *str)
-{
-	const char *cursor;
-	int c;
-
-	log(("\n\nmatch(\"%s\")\n\n", str));
-
-	cursor = str;
-	while ((c = memGetc(mp)) != EOF) {
-		if (options.debug)
-			logChar(c);
-		if (tolower(c) == (int)*cursor) {
-			if (*++cursor == '\0') {
-				if (options.debug)
-					logChar(EOF);
-				return 0;
-			}
-		} else if (c != '\n' && c != '\r')
-			cursor = str;
-	}
-	if (options.debug)
-		logChar(EOF);
-	return -1;
-}
 
 static const char PAGEID[] = "Page id: ";
 static const char SRCID[] = "srcId: ";
@@ -237,7 +209,7 @@ getQuantity(int want, int available)
 	return available - 1;
 }
 
-static const char HISTORY_URL[] = "http://%s/ws/eBayISAPI.dll?ViewBids&item=%s";
+static const char HISTORY_URL[] = "https://%s/ws/eBayISAPI.dll?ViewBids&item=%s";
 
 /*
  * getInfo(): Get info on auction from bid history page.
@@ -273,7 +245,7 @@ getInfoTiming(auctionInfo *aip, time_t *timeToFirstByte)
 		memBuf_t *mp = NULL;
 
 		if (!aip->query) {
-			size_t urlLen = sizeof(HISTORY_URL) + strlen(options.historyHost) + strlen(aip->auction) - (2*2);
+			size_t urlLen = sizeof(HISTORY_URL) + strlen(options.historyHost) + strlen(aip->auction) - (2*placemakerLen) + 1;
 
 			aip->query = (char *)myMalloc(urlLen);
 			sprintf(aip->query, HISTORY_URL, options.historyHost, aip->auction);
@@ -301,7 +273,8 @@ getInfoTiming(auctionInfo *aip, time_t *timeToFirstByte)
  * Note: quant=1 is just to dupe eBay into allowing the pre-bid to get
  *	 through.  Actual quantity will be sent with bid.
  */
-static const char PRE_BID_URL[] = "http://%s/ws/eBayISAPI.dll?MfcISAPICommand=MakeBid&fb=2&co_partner_id=&item=%s&maxbid=%s&quant=%s";
+static const char PRE_BID_URL[] = "https://%s/ws/eBayISAPI.dll?MfcISAPICommand=MakeBid&fb=2&co_partner_id=&item=%s";
+static const char PRE_BID_DATA[] = "maxbid=%s&quant=%s";
 
 /*
  * Get bid key
@@ -314,19 +287,25 @@ preBid(auctionInfo *aip)
 	memBuf_t *mp = NULL;
 	int quantity = getQuantity(options.quantity, aip->quantity);
 	char quantityStr[12];	/* must hold an int */
-	size_t urlLen;
-	char *url;
+	size_t urlLen, dataLen;
+	char *url, *data;
 	int ret = 0;
 
 	if (ebayLogin(aip, 0))
 		return 1;
 	sprintf(quantityStr, "%d", quantity);
-	urlLen = sizeof(PRE_BID_URL) + strlen(options.prebidHost) + strlen(aip->auction) + strlen(aip->bidPriceStr) + strlen(quantityStr) - (4*2);
+	/* create url */ 
+	urlLen = sizeof(PRE_BID_URL) + strlen(options.prebidHost) + strlen(aip->auction) - (2*placemakerLen) + 1;
 	url = (char *)myMalloc(urlLen);
-	sprintf(url, PRE_BID_URL, options.prebidHost, aip->auction, aip->bidPriceStr, quantityStr);
-	log(("\n\n*** preBid(): url is %s\n", url));
-	mp = httpGet(url, NULL);
+	sprintf(url, PRE_BID_URL, options.prebidHost, aip->auction);
+	/* create data */
+	dataLen = sizeof(PRE_BID_DATA) + strlen(aip->bidPriceStr) + strlen(quantityStr) - (2*placemakerLen) + 1;
+	data = (char *)myMalloc(dataLen);
+	sprintf(data, PRE_BID_DATA, aip->bidPriceStr, quantityStr);
+	log(("\n\n*** preBid(): url is %s with data %s\n", url, data));
+	mp = httpPost(url, data, NULL);
 	free(url);
+	free(data);
 	if (!mp)
 		return httpError(aip);
 
@@ -335,68 +314,34 @@ preBid(auctionInfo *aip)
 	return ret;
 }
 
+static headerVal_t bidVals[] = {"uiid", 1, -1, 0, NULL,
+                                "stok", 1, -1, 0, NULL,
+                                "srt", 1, -1, 0, NULL};
+
 static int
 parsePreBid(memBuf_t *mp, auctionInfo *aip)
 {
+	int i;
+	char** bidInfo[] = {&aip->biduiid, &aip->bidstok, &aip->bidsrt}; // Points to target items in aip
 	int ret = 0;
 	int found = 0; //Used as binary store - 1=uiid,10=stok,100=srt
 
 	memReset(mp);
-	while (!match(mp, "name=\"uiid\"")) {
-		char *start, *value, *end;
 
-		for (start = mp->readptr; start >= mp->memory && *start != '<'; --start)
-			;
-		value = strcasestr(start, "value=\"");
-		end = strchr(start, '>');
-
-		if (!value || !end || value > end)
-			continue;
-		free(aip->biduiid);
-		mp->readptr = value + 7;
-		aip->biduiid = myStrdup(getUntil(mp, '\"'));
-		log(("preBid(): biduiid is \"%s\"", aip->biduiid));
-		found |= TOKEN_FOUND_UIID;
-		break;
-	}
-
-	memReset(mp);
-	while (!match(mp, "name=\"stok\"")) {
-		char *start, *value, *end;
-
-		for (start = mp->readptr; start >= mp->memory && *start != '<'; --start)
-			;
-		value = strcasestr(start, "value=\"");
-		end = strchr(start, '>');
-
-		if (!value || !end || value > end)
-			continue;
-		free(aip->bidstok);
-		mp->readptr = value + 7;
-		aip->bidstok = myStrdup(getUntil(mp, '\"'));
-		log(("preBid(): bidstok is \"%s\"", aip->bidstok));
-		found |= TOKEN_FOUND_STOK;
-		break;
-	}
-
-	memReset(mp);
-	while (!match(mp, "name=\"srt\"")) {
-		char *start, *value, *end;
-
-		for (start = mp->readptr; start >= mp->memory && *start != '<'; --start)
-			;
-		value = strcasestr(start, "value=\"");
-		end = strchr(start, '>');
-
-		if (!value || !end || value > end)
-			continue;
-		free(aip->bidsrt);
-		mp->readptr = value + 7;
-		aip->bidsrt = myStrdup(getUntil(mp, '\"'));
-		log(("preBid(): bidsrt is \"%s\"", aip->bidsrt));
-		found |= TOKEN_FOUND_SRT;
-		break;
-	}
+	// Get values needed
+	for(i = 0; i < sizeof(bidVals)/sizeof(headerAttr_t); i++)
+		if(!getVals(mp->memory, mp->size, &bidVals[i], "parsePreBid") && strlen(bidVals[i].value) > 0) {
+			free(*bidInfo[i]);
+			*bidInfo[i] = (char*)myMalloc(strlen(bidVals[i].value) + 1);
+			strncpy(*bidInfo[i], bidVals[i].value, strlen(bidVals[i].value) + 1);
+			found |= (1 << i);
+		}
+		else {
+			ret = -1;
+			break;
+		}
+	// Free memory
+	for(i = 0; i < sizeof(bidVals)/sizeof(headerAttr_t); free(bidVals[i++].value));
 
 	if ((found & TOKEN_FOUND_ALL) != TOKEN_FOUND_ALL) {
 		pageInfo_t *pageInfo = getPageInfo(mp);
@@ -408,6 +353,7 @@ parsePreBid(memBuf_t *mp, auctionInfo *aip)
 		}
 		freePageInfo(pageInfo);
 	}
+
 	return ret;
 }
 
@@ -486,7 +432,7 @@ static transfercontent_t transfercontent[] = { 3, 0, 1,
 			   5, 1, 0};
 
 static int
-signinFormSearch(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t searchfor)
+parseHtmlSource(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t searchfor, char* label)
 {
 	char* start = src;
 	char* end = src + srcLen;
@@ -525,7 +471,7 @@ signinFormSearch(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t
 			searchdef->value = (char *)myMalloc(strlen(res) + 1);
 			strncpy(searchdef->value, (char*) &res, strlen(res) + 1);
 			if (options.debug)
-				dlog("%s(): %s=%s", (searchfor == st_attribute ? "findAttr" : "searchvalue"), 
+				dlog("%s(): %s=%s", (label != NULL ? label : (searchfor == st_attribute ? "findAttr" : "searchvalue")), 
 					searchdef->name, searchdef->value);
 			return 0;
 		}
@@ -536,7 +482,7 @@ signinFormSearch(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t
             searchdef->value = (char *)myMalloc(1);
             strncpy(searchdef->value, "\0", 1);
             if (options.debug)
-               dlog("%s(): %s=%s", (searchfor == st_attribute ? "findAttr" : "searchvalue"),
+               dlog("%s(): %s=%s", (label != NULL ? label : (searchfor == st_attribute ? "findAttr" : "searchvalue")),
                        searchdef->name, searchdef->value);
             return searchdef->mandatory;
         }
@@ -544,21 +490,21 @@ signinFormSearch(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t
 }
 
 static int
-findAttr(char* src, size_t srcLen, headerAttr_t* attr)
+findAttr(char* src, size_t srcLen, headerAttr_t* attr, char* label)
 {
-	return signinFormSearch(src, srcLen, attr, st_attribute);
+	return parseHtmlSource(src, srcLen, attr, st_attribute, label);
 }
 
 static int
-getVals(char* src, size_t srcLen, headerVal_t* vals)
+getVals(char* src, size_t srcLen, headerVal_t* vals, char* label)
 {
-	return signinFormSearch(src, srcLen, vals, st_value);
+	return parseHtmlSource(src, srcLen, vals, st_value, label);
 }
 
 static int
-getJson(char* src, size_t srcLen, jsonVal_t* vals)
+getJson(char* src, size_t srcLen, jsonVal_t* vals, char* label)
 {
-        return signinFormSearch(src, srcLen, vals, st_json);
+        return parseHtmlSource(src, srcLen, vals, st_json, label);
 }
 
 
@@ -602,7 +548,7 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	if (initCurlStuff())
 		return auctionError(aip, ae_unknown, NULL);
 
-        urlLen = sizeof(LOGIN_2_URL) + strlen(options.loginHost) - (1*2);
+        urlLen = sizeof(LOGIN_2_URL) + strlen(options.loginHost) - (1*placemakerLen) + 1;
         url = (char *)myMalloc(urlLen);
         sprintf(url, LOGIN_2_URL, options.loginHost);
         mp = httpPost(url, NULL, NULL); /* Send fake login in order to get wanted html data */
@@ -613,15 +559,15 @@ ebayLogin(auctionInfo *aip, time_t interval)
 
 	// Get all attributes and values needed
 	for(i = 0; i < sizeof(headerAttrs)/sizeof(headerAttr_t); i++)
-		if(findAttr(mp->memory, mp->size, &headerAttrs[i]))
+		if(findAttr(mp->memory, mp->size, &headerAttrs[i], NULL))
 			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
 				"findAttr cannot find %s (headerAttrs)", headerAttrs[i].name);
 	for(i = 0; i < sizeof(headerVals)/sizeof(headerVal_t); i++)
-		if(getVals(mp->memory, mp->size, &headerVals[i]))
+		if(getVals(mp->memory, mp->size, &headerVals[i], NULL))
 			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
 				"getVals cannot find %s (headerVals)", headerVals[i].name);
 	for(i = 0; i < sizeof(globalDfpContext)/sizeof(jsonVal_t); i++)
-                if(getJson(mp->memory, mp->size, &globalDfpContext[i]))
+                if(getJson(mp->memory, mp->size, &globalDfpContext[i], NULL))
                         bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
                                 "getJson cannot find %s (globalDfpContext)", globalDfpContext[i].name);
 
@@ -646,10 +592,12 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	freeMembuf(mp);
 	mp = NULL;
 
-	urlLen = sizeof(LOGIN_2_URL) + strlen(options.loginHost) - (1*2);
+	/* create url */
+	urlLen = sizeof(LOGIN_2_URL) + strlen(options.loginHost) - (1*placemakerLen) + 1;
 	password = getPassword();
 	url = (char *)myMalloc(urlLen);
 	sprintf(url, LOGIN_2_URL, options.loginHost);
+	/* create data + log */
 	data = (char *)myMalloc(	sizeof(LOGIN_DATA)
                                       + strlen(options.usernameEscape)
                                       + strlen(password)
@@ -659,7 +607,7 @@ ebayLogin(auctionInfo *aip, time_t interval)
                                       + strlen(headerVals[SRT].value)
                                       + strlen(headerVals[USID].value)
                                       + strlen(headerVals[USID].value)
-				      - (8*strlen("%s"))
+				      - (8*placemakerLen) + 1
                                       );
 	logdata = (char *)myMalloc(	sizeof(LOGIN_DATA)
                                       + strlen(options.usernameEscape)
@@ -670,7 +618,7 @@ ebayLogin(auctionInfo *aip, time_t interval)
                                       + strlen(headerVals[SRT].value)
                                       + strlen(headerVals[USID].value)
                                       + strlen(headerVals[USID].value)
-				      - (8*strlen("%s"))
+				      - (8*placemakerLen) + 1
                                       );
 	sprintf(data, LOGIN_DATA,	headerVals[RQID].value,
 					headerVals[GUID].value,
@@ -892,7 +840,9 @@ parseBid(memBuf_t *mp, auctionInfo *aip)
 	return ret;
 } /* parseBid() */
 
-static const char BID_URL[] = "http://%s/ws/eBayISAPI.dll?MfcISAPICommand=MakeBid&maxbid=%s&quant=%s&mode=1&uiid=%s&co_partnerid=2&user=%s&fb=2&item=%s&stok=%s&srt=%s";
+static const char BID_URL[] = "https://%s/ws/eBayISAPI.dll?MfcISAPICommand=MakeBid&mode=1&co_partnerid=2fb=2&item=%s";
+static const char BID_DATA[] = "user=%s&maxbid=%s&quant=%s&uiid=%s&stok=%s&srt=%s";
+static const char BID_LOG[] = "bid(): url=%s with data %s";
 
 /*
  * Place bid.
@@ -905,8 +855,8 @@ static int
 bid(auctionInfo *aip)
 {
 	memBuf_t *mp = NULL;
-	size_t urlLen;
-	char *url, *logUrl, *tmpUsername, *tmpUiid, *tmpStok, *tmpSrt;
+	size_t urlLen, dataLen, logLen, logLen2;
+	char *url, *data, *logdata, *logdata2, *tmpStars;
 	int ret;
 	int quantity = getQuantity(options.quantity, aip->quantity);
 	char quantityStr[12];	/* must hold an int */
@@ -919,32 +869,36 @@ bid(auctionInfo *aip)
 	sprintf(quantityStr, "%d", quantity);
 
 	/* create url */
-	urlLen = sizeof(BID_URL) + strlen(options.bidHost) + strlen(aip->bidPriceStr) + strlen(quantityStr) + strlen(aip->biduiid) + strlen(options.usernameEscape) + strlen(aip->auction) + strlen(aip->bidstok) + strlen(aip->bidsrt) - (8*2);
+	urlLen = sizeof(BID_URL) + strlen(options.bidHost) + strlen(aip->auction) - (2*placemakerLen) + 1;
 	url = (char *)myMalloc(urlLen);
-	sprintf(url, BID_URL, options.bidHost, aip->bidPriceStr, quantityStr, aip->biduiid, options.usernameEscape, aip->auction, aip->bidstok, aip->bidsrt);
-
-	logUrl = (char *)myMalloc(urlLen);
-	tmpUsername = stars(strlen(options.usernameEscape));
-	tmpUiid = stars(strlen(aip->biduiid));
-	tmpStok = stars(strlen(aip->bidstok));
-	tmpSrt = stars(strlen(aip->bidsrt));
-	sprintf(logUrl, BID_URL, options.bidHost, aip->bidPriceStr, quantityStr, tmpUiid, tmpUsername, aip->auction, tmpStok, tmpSrt);
-	free(tmpUsername);
-	free(tmpUiid);
-    free(tmpStok);
-    free(tmpSrt);
+	sprintf(url, BID_URL, options.bidHost, aip->auction);
+	/* create data */
+	dataLen = sizeof(BID_DATA) + strlen(options.usernameEscape) + strlen(aip->bidPriceStr) + strlen(quantityStr) + strlen(aip->biduiid) + strlen(aip->bidstok) + strlen(aip->bidsrt) - (6*placemakerLen) + 1;
+        data = (char *)myMalloc(dataLen);
+        sprintf(data, BID_DATA, options.usernameEscape, aip->bidPriceStr, quantityStr, aip->biduiid, aip->bidstok, aip->bidsrt);
+	/* create log */
+	tmpStars = stars(3);
+	logLen2 = sizeof(BID_DATA) + (6*strlen(tmpStars)) - (6*placemakerLen) + 1; 
+	logdata2 = (char *)myMalloc(logLen2);
+	sprintf(logdata2, BID_DATA, tmpStars, tmpStars, tmpStars, tmpStars, tmpStars, tmpStars);
+	logLen = strlen(BID_LOG) - (2*placemakerLen) + urlLen + logLen2 + 1;
+	logdata = (char *)myMalloc(logLen);
+	sprintf(logdata, BID_LOG, url, logdata2); 
 
 	if (!options.bid) {
 		printLog(stdout, "Bidding disabled\n");
-		log(("\n\nbid(): query url:\n%s\n", logUrl));
+		log(("\n\nbid(): query url:\n%s\n\twith data: %s\n", url, data));
 		ret = aip->bidResult = 0;
-	} else if (!(mp = httpGet(url, logUrl))) {
+	} else if (!(mp = httpPost(url, data, logdata))) {
 		ret = httpError(aip);
 	} else {
 		ret = parseBid(mp, aip);
 	}
 	free(url);
-	free(logUrl);
+	free(data);
+	free(logdata);
+	free(logdata2);
+	free(tmpStars);
 	freeMembuf(mp);
 	return ret;
 } /* bid() */
@@ -1262,7 +1216,7 @@ printMyItemsRow(char **row, int printNewline)
 	return ret;
 }
 
-static const char MYITEMS_URL[] = "http://%s/ws/eBayISAPI.dll?MyeBay&CurrentPage=MyeBayWatching";
+static const char MYITEMS_URL[] = "https://%s/ws/eBayISAPI.dll?MyeBay&CurrentPage=MyeBayWatching";
 
 /*
  * TODO: allow user configuration of myItems.
@@ -1282,7 +1236,7 @@ printMyItems(void)
 		freeAuction(dummy);
 		return 1;
 	}
-	urlLen = sizeof(MYITEMS_URL) + strlen(options.myeBayHost) - (1*2);
+	urlLen = sizeof(MYITEMS_URL) + strlen(options.myeBayHost) - (1*placemakerLen) + 1;
 	url = (char *)myMalloc(urlLen);
 	sprintf(url, MYITEMS_URL, options.myeBayHost);
 	mp = httpGet(url, NULL);
