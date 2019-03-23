@@ -94,7 +94,7 @@ static int parseBid(memBuf_t *mp, auctionInfo *aip);
 static int preBid(auctionInfo *aip);
 static int parseHtmlSource(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t searchfor, char* label);
 static int parsePreBid(memBuf_t *mp, auctionInfo *aip);
-static int printMyItemsRow(char **row, int printNewline);
+static int printMyItemsRow(char *row);
 static int watch(auctionInfo *aip);
 
 static const char PAGEID[] = "Page id: ";
@@ -1152,67 +1152,94 @@ snipeAuction(auctionInfo *aip)
 	return won;
 }
 
-/* Max \td in the description table (is 8 on 02 of May 2010): */
-#define MAX_TDS 8
-#define MAX_TDS_LENGTH 6
-
 /*
- * On first call, use printNewline to 0.  On subsequent calls, use return
- * value from previous call.
+ * Print out items
  */
 static int
-printMyItemsRow(char **row, int printNewline)
+printMyItemsRow(char *row)
 {
-	const char *myitems_description[MAX_TDS][MAX_TDS_LENGTH] = {
-		{0, 0, 0, 0, 0, 0},
-		{0, 0, 0, 0, 0, 0},
-		{"Description:\t%s\n", 0, "Seller:\t\t%s", 0, 0," (%s)\n"},
-		{ "Bids:\t\t%s\n", 0, 0, 0, 0, 0},
-		{ "Price:\t\t%s\n", 0, 0, 0, 0, 0},
-		{ "Shipping:\t%s\n", 0, 0, 0, 0, 0},
-		{ "Time left:\t%s\n", 0, 0, 0, 0, 0},
-		{ 0, 0, 0, 0, 0, 0},
-	};
-	int column = 0;
-	int ret = printNewline;
-	int item_nr=0;	/* count no_tag item */
+	typedef enum _watchsearch { ws_none, ws_attval, ws_text, ws_num } watchsearch_t;
+	typedef enum _watchsubsearch { wss_none, wss_converted } watchsubsearch_t;
 
-	for (; row[column]; ++column) {
-		memBuf_t buf;
-		char *value = NULL;
+	typedef struct _watchsrc {
+		char* search;
+		watchsearch_t method;
+		watchsubsearch_t submethod;
+	} watchsrc_t;
 
-		if (column == 0) { /* item nr on checkbox in 1st (-1) column */
-			static const char search[] = "value=";
-			char *tmp = strstr(row[column], search);
+	const char* ended="ENDED";
+	const char* clipped="class=\"clipped\">";
+	const char* converted="Converted from ";
+	int i, ii=0, num, ret=0;
+	char *tmp, *tmp2, buf[64];
+	char* ptr[] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+	char* ptr2[] = {0, 0};
+	watchsrc_t watchsrc[] = { "data-itemid=\"", ws_attval, wss_none,
+				"aria-label=\"", ws_attval, wss_none,
+				"<div class=\"item-variations\">", ws_text, wss_none,
+				"<li class=\"price-info\">", ws_num, wss_none,
+				"class=\"info-price\">", ws_text, wss_converted,
+				"class=\"info-shipping\">", ws_text, wss_converted,
+				"class=\"info-time\">", ws_text, wss_none,
+				"class=\"info-username\">", ws_text, wss_none,
+				"class=\"info-score\">", ws_text, wss_none,
+				0, 0, 0};
 
-			if (tmp) {
-				int i;
+	/* Ended ? */
+	if(strstr(row, ended)) return 0;
 
-				tmp += sizeof(search) - 1;
-				for (; !isdigit(*tmp); ++tmp)
-					;
-				for (i = 1; isdigit(tmp[i]); ++i)
-					;
-				value = myStrndup(tmp, (size_t)(i));
-				printLog(stdout, "ItemNr:\t\t%s\n", value);
-				free(value);
+	/* Get auction infos */
+	for(i=0; i < (sizeof(watchsrc)/sizeof(watchsrc_t)); i++) {
+		if(!watchsrc[i].search) continue;
+
+		tmp = strstr(row, watchsrc[i].search);
+		if(tmp) {
+			tmp+=strlen(watchsrc[i].search);
+			switch(watchsrc[i].method) {
+				case ws_attval:
+					ptr[i] = getNonTagFromString(tmp);
+					if((tmp2=strstr(ptr[i], "\""))) *tmp2 = '\0';
+					break;
+				case ws_text:
+					ptr[i] = getNonTagFromString(tmp);
+					if((tmp2=strstr(ptr[i], "<"))) *tmp2 = '\0';
+					break;
+				case ws_num:
+					num = getIntFromString(tmp);
+					sprintf(buf, "%d", num);
+					ptr[i] = myStrdup(buf);
+					break;
+			}
+
+			switch(watchsrc[i].submethod) {
+				case wss_converted:
+					tmp2=strstr(tmp, clipped);
+					if(tmp2)
+					{
+						tmp2+=strlen(clipped);
+						ptr2[ii] = getNonTagFromString(tmp2);
+						if((tmp2=strstr(ptr2[ii], "<"))) *tmp2 = '\0';
+						if((tmp2=strstr(ptr2[ii], converted))) {
+							sprintf(buf, "(%s)", tmp2+strlen(converted));
+							free(ptr2[ii]);
+							ptr2[ii] = myStrdup(buf);
+						}
+						else *ptr2[ii] = '\0';
+						ii++;
+					}
+					break;
 			}
 		}
-		strToMemBuf(row[column], &buf); /* load new row */
-		for (item_nr = 0; item_nr < MAX_TDS_LENGTH; item_nr++) {
-			value = getNonTag(&buf);
-
-			/* there may be a "ENDING SOON" message */
-			if ((column==2)&&(item_nr==0)&&strstr(value,"ENDING SOON"))
-				value = getNonTag(&buf);
-			/* when nothing interesting in row */
-			if (column >= MAX_TDS || !myitems_description[column][item_nr])
-				continue;
-			/* print the entry */
-			printLog(stdout, myitems_description[column][item_nr], value ? value : "");
-		}
 	}
-	printf("\n");	/* for spacing */
+
+	/* Print item */
+	printf("Description:\t%s (%s)\n\tItem-Id:\t%s\n\tSeller:\t\t%s %s\n\tBids:\t\t%s\n\tPrice:\t\t%s %s\n\tShipping:\t%s %s\n\tTime left:\t%s\n\n",
+		ptr[1], ptr[2], ptr[0], ptr[7], ptr[8], ptr[3], ptr[4], ptr2[0], ptr[5], ptr2[1], ptr[6]);
+
+	/* Free memory */
+	for(i=0; i<(sizeof(ptr)/sizeof(char*)); free(ptr[i++]));
+	for(i=0; i<(sizeof(ptr2)/sizeof(char*)); free(ptr2[i++]));
+
 	return ret;
 }
 
@@ -1224,11 +1251,10 @@ static const char MYITEMS_URL[] = "https://%s/ws/eBayISAPI.dll?MyeBay&CurrentPag
 int
 printMyItems(void)
 {
+	const char* myitem = "<div class=\"m-item\">";
 	memBuf_t *mp = NULL;
-	const char *table;
-	char **row;
 	auctionInfo *dummy = newAuctionInfo("0", "0");
-	char *url;
+	char *url, *next;
 	size_t urlLen;
 
 	if (ebayLogin(dummy, 0)) {
@@ -1248,24 +1274,17 @@ printMyItems(void)
 		freeMembuf(mp);
 		return 1;
 	}
-	while ((table = getTableStart(mp))) {
-		int printNewline = 0;
 
-		/* search for table containing my itmes */
-		if (!strstr(table, "class=\"my_itl-iT\""))
-			continue;
-		/* skip first descriptive table row */
-		if ((row = getTableRow(mp)))
-			freeTableRow(row);
-		else {
-			freeAuction(dummy);
-			return 0; /* error? */
-		}
-		while ((row = getTableRow(mp))) {
-			printNewline = printMyItemsRow(row, printNewline);
-			freeTableRow(row);
-		}
+	/* Loop over watched items */
+	mp->memory = strstr(mp->memory, myitem);
+	while(mp->memory) {
+		next = strstr(mp->memory + strlen(myitem), myitem);
+		/* End if item */
+		if(next) *(next-1)='\0';
+		printMyItemsRow(mp->memory);
+		mp->memory = next;
 	}
+
 	freeAuction(dummy);
 	freeMembuf(mp);
 	return 0;
