@@ -194,7 +194,15 @@ getNonTag(memBuf_t *mp)
 
 				term(buf, bufsize, count);
 				if (*cp == '#') {
-					buf[amp-1] = (char)atoi(cp+1);
+					if (*(cp+1)=='x' || *(cp+1)=='X') {
+						sscanf(cp+2, "%x", &c);
+						buf[amp-1] = (char)c & 0xFF;
+					}
+					else
+						buf[amp-1] = (char)atoi(cp+1);
+					count = amp;
+				} else if (!strcmp(cp+1, "uml") || !strcmp(cp, "szlig")) {	/* German umlauts */ 
+					buf[amp-1] = '?';
 					count = amp;
 				} else if (!strcmp(cp, "amp")) {
 					count = amp;

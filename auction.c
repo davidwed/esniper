@@ -1159,7 +1159,7 @@ static int
 printMyItemsRow(char *row)
 {
 	typedef enum _watchsearch { ws_none, ws_attval, ws_text, ws_num } watchsearch_t;
-	typedef enum _watchsubsearch { wss_none, wss_converted } watchsubsearch_t;
+	typedef enum _watchsubsearch { wss_none, wss_decodehtmltwice, wss_converted } watchsubsearch_t;
 
 	typedef struct _watchsrc {
 		char* search;
@@ -1172,18 +1172,20 @@ printMyItemsRow(char *row)
 	const char* converted="Converted from ";
 	int i, ii=0, num, ret=0;
 	char *tmp, *tmp2, buf[64];
-	char* ptr[] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+	char* ptr[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 	char* ptr2[] = {0, 0};
 	watchsrc_t watchsrc[] = { "data-itemid=\"", ws_attval, wss_none,
-				"aria-label=\"", ws_attval, wss_none,
-				"<div class=\"item-variations\">", ws_text, wss_none,
-				"<li class=\"price-info\">", ws_num, wss_none,
+				"aria-label=\"", ws_attval, wss_decodehtmltwice,
+				"class=\"item-variations\">", ws_text, wss_none,
+				"class=\"price-info\">", ws_num, wss_none,
 				"class=\"info-price\">", ws_text, wss_converted,
 				"class=\"info-shipping\">", ws_text, wss_converted,
-				"class=\"info-time\">", ws_text, wss_none,
+				"class=\"info-timer\">", ws_text, wss_none,
 				"class=\"info-username\">", ws_text, wss_none,
 				"class=\"info-score\">", ws_text, wss_none,
+				"class=\"info-time\">", ws_text, wss_none,
 				0, 0, 0};
+	struct tm rawtm;
 
 	/* Ended ? */
 	if(strstr(row, ended)) return 0;
@@ -1212,6 +1214,13 @@ printMyItemsRow(char *row)
 			}
 
 			switch(watchsrc[i].submethod) {
+				case wss_decodehtmltwice:
+					tmp2=getNonTagFromString(ptr[i]);
+					if(tmp2) {
+						free(ptr[i]);
+						ptr[i] = myStrdup(tmp2);
+					}
+					break;	
 				case wss_converted:
 					tmp2=strstr(tmp, clipped);
 					if(tmp2)
@@ -1234,7 +1243,7 @@ printMyItemsRow(char *row)
 
 	/* Print item */
 	printf("Description:\t%s (%s)\n\tItem-Id:\t%s\n\tSeller:\t\t%s %s\n\tBids:\t\t%s\n\tPrice:\t\t%s %s\n\tShipping:\t%s %s\n\tTime left:\t%s\n\n",
-		ptr[1], ptr[2], ptr[0], ptr[7], ptr[8], ptr[3], ptr[4], ptr2[0], ptr[5], ptr2[1], ptr[6]);
+		ptr[1], (ptr[2] ? ptr[2] : "---"), ptr[0], ptr[7], ptr[8], ptr[3], ptr[4], ptr2[0], ptr[5], ptr2[1], (ptr[6] ? ptr[6] : ptr[9]));
 
 	/* Free memory */
 	for(i=0; i<(sizeof(ptr)/sizeof(char*)); free(ptr[i++]));
@@ -1279,7 +1288,7 @@ printMyItems(void)
 	mp->memory = strstr(mp->memory, myitem);
 	while(mp->memory) {
 		next = strstr(mp->memory + strlen(myitem), myitem);
-		/* End if item */
+		/* End of item */
 		if(next) *(next-1)='\0';
 		printMyItemsRow(mp->memory);
 		mp->memory = next;
