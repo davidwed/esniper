@@ -26,6 +26,7 @@
 
 #include <ctype.h>
 #include <string.h>
+#include <stdlib.h>
 #include "buffer.h"
 #include "http.h"
 #include "html.h"
@@ -35,6 +36,23 @@
  * rudimentary HTML parser, maybe, we should use libxml2 instead?
  */
 
+const char to_de_iso8859[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,/* 00 */
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,       /* 10 */
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,       /* 20 */
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,       /* 30 */
+			0, 196, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 214,   /* 40 */
+			0, 0, 0, 223, 0, 214, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   /* 50 */
+			0, 228, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 246,   /* 60 */
+			0, 0, 0, 223, 0, 252, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }; /* 70 */
+
+const int to_de_utf8[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,          /* 00 */
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,             /* 10 */
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,             /* 20 */
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,             /* 30 */
+			0, 0xc384, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xc396,   /* 40 */
+			0, 0, 0, 0xc39f, 0, 0xc39c, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   /* 50 */
+			0, 0xc3a4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xc3b6,   /* 60 */
+			0, 0, 0, 0xc39f, 0, 0xc3bc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }; /* 70 */
 
 /*
  * Get next tag text, eliminating leading and trailing whitespace
@@ -159,6 +177,9 @@ getNonTag(memBuf_t *mp)
 	size_t count = 0, amp = 0;
 	int c;
 
+	char* lang=getenv("LANG");
+	char* utf8=strstr(lang, "UTF-8");
+
 	if (memEof(mp)) {
 		log(("getNonTag(): returning NULL\n"));
 		return NULL;
@@ -183,10 +204,17 @@ getNonTag(memBuf_t *mp)
 		case '\v':
 		case 0x82: /* UTF-8 */
 		case 0xC2: /* UTF-8 */
-		case 0xC3: /* UTF-8 */
 		case 0xA0: /* iso-8859-1 nbsp */
 			if (count && buf[count-1] != ' ')
 				addchar(buf, bufsize, count, ' ');
+			break;
+		case 0xC3: /* UTF-8 */
+			if(utf8)
+				addchar(buf, bufsize, count, (char)c);
+			else {
+				if (count && buf[count-1] != ' ')
+					addchar(buf, bufsize, count, ' ');
+			}
 			break;
 		case ';':
 			if (amp > 0) {
@@ -202,8 +230,28 @@ getNonTag(memBuf_t *mp)
 						buf[amp-1] = (char)atoi(cp+1);
 					count = amp;
 				} else if (!strcmp(cp+1, "uml") || !strcmp(cp, "szlig")) {	/* German umlauts */ 
-					buf[amp-1] = '?';
-					count = amp;
+					if(!strncasecmp(lang, "de", 2)) {			/* System language = 'de' */
+						if(!utf8) {
+							if(*cp < (sizeof(to_de_iso8859)/sizeof(char)) && to_de_iso8859[*cp])
+								buf[amp-1] = to_de_iso8859[*cp];
+							else
+								buf[amp-1] = '?';
+							count = amp;
+						}
+						else {
+							if(*cp < (sizeof(to_de_utf8)/sizeof(int)) && to_de_utf8[*cp]) {
+								buf[amp-1] = (to_de_utf8[*cp] & 0xFF00) >> 8;
+								buf[amp]   = (to_de_utf8[*cp] & 0x00FF);
+								count = amp+1;
+							} else {
+								buf[amp-1] = '?';
+								count = amp;
+							}
+						}
+					} else	{
+						buf[amp-1] = '?';
+						count = amp;
+					}
 				} else if (!strcmp(cp, "amp")) {
 					count = amp;
 				} else if (!strcmp(cp, "gt")) {

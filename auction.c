@@ -1185,7 +1185,6 @@ printMyItemsRow(char *row)
 				"class=\"info-score\">", ws_text, wss_none,
 				"class=\"info-time\">", ws_text, wss_none,
 				0, 0, 0};
-	struct tm rawtm;
 
 	/* Ended ? */
 	if(strstr(row, ended)) return 0;
