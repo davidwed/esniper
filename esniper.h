@@ -41,6 +41,7 @@ typedef struct {
 	char *auctfilename;
 	int bid;
 	int reduce;
+	int winprior;
 	int debug;
 	int usage;
 	int info;
