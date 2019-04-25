@@ -1394,5 +1394,11 @@ testParser(int flag)
 		printAuctionError(aip, stdout);
 		break;
 		}
+	case  6:
+		{
+		/* Test html parser */
+		printf("Output: %s\n", getNonTag(mp));
+		break;
+		}
 	}
 }
