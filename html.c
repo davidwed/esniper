@@ -261,7 +261,7 @@ getNonTag(memBuf_t *mp)
 	size_t count = 0, amp = 0;
 	int c, f, i;
 
-	char* lang=getenv("LANG");
+	char* lang=(getenv("LANG") != NULL ? getenv("LANG") : "");
 	char* utf8=strstr(lang, "UTF-8");
 
 	if (memEof(mp)) {
