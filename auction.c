@@ -77,7 +77,7 @@ typedef struct _transfercontent
 static time_t loginTime = 0;	/* Time of last login */
 static time_t defaultLoginInterval = 12 * 60 * 60;	/* ebay login interval */
 
-static size_t placemakerLen = strlen("%s");
+size_t placemakerLen = strlen("%s");
 
 static int acceptBid(const char *pagename, auctionInfo *aip);
 static int bid(auctionInfo *aip);
