@@ -671,7 +671,8 @@ ebayLogin(auctionInfo *aip, time_t interval)
 			 !strncasecmp(pp->pageName, " Black Friday", 13) ||
 			 !strncasecmp(pp->pageName, "Black Friday", 12) ||
 			 !strncasecmp(pp->pageName, "Electronics", 11) ||
-                         !strncasecmp(pp->pageName, "eBay: Update your contact info", 30)) 
+                         !strncasecmp(pp->pageName, "eBay: Update your contact info", 30) ||
+                         !strncasecmp(pp->pageName, "Validating JavaScript Engine", 28)) 
 		    ))
 			loginTime = time(NULL);
 		else if (pp->pageName &&
