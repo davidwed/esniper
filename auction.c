@@ -399,6 +399,8 @@ pass=%s&\
 kmsi=1&\
 rdrlog=";
 
+static const char* JAVAISSUE = "Validating JavaScript Engine";
+
 static const char* id1="id=\"";
 static const char* id2="value=\"";
 static const char* id3=":\"";
@@ -535,6 +537,7 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	int ret = 0;
 	char *password;
 	int i;	
+	int noBugReport=0;
 
 	/* negative value forces login */
 	if (loginTime > 0) {
@@ -557,18 +560,24 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	if (!mp)
 		return httpError(aip);
 
+	// In some cases ebay is checking for java script
+        if ((pp = getPageInfo(mp)) && !strncasecmp(pp->pageName, JAVAISSUE, strlen(JAVAISSUE))) {
+		noBugReport=1;
+		printLog(stdout, "# Warning: Pagename \"%s\" found (Response to fake login).\n", pp->pageName);
+	}
+
 	// Get all attributes and values needed
 	for(i = 0; i < sizeof(headerAttrs)/sizeof(headerAttr_t); i++)
 		if(findAttr(mp->memory, mp->size, &headerAttrs[i], NULL))
-			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
+			if(!noBugReport) bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
 				"findAttr cannot find %s (headerAttrs)", headerAttrs[i].name);
 	for(i = 0; i < sizeof(headerVals)/sizeof(headerVal_t); i++)
 		if(getVals(mp->memory, mp->size, &headerVals[i], NULL))
-			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
+			if(!noBugReport) bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
 				"getVals cannot find %s (headerVals)", headerVals[i].name);
 	for(i = 0; i < sizeof(globalDfpContext)/sizeof(jsonVal_t); i++)
                 if(getJson(mp->memory, mp->size, &globalDfpContext[i], NULL))
-                        bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
+                        if(!noBugReport) bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
                                 "getJson cannot find %s (globalDfpContext)", globalDfpContext[i].name);
 
 	// Transfer json
@@ -671,10 +680,14 @@ ebayLogin(auctionInfo *aip, time_t interval)
 			 !strncasecmp(pp->pageName, " Black Friday", 13) ||
 			 !strncasecmp(pp->pageName, "Black Friday", 12) ||
 			 !strncasecmp(pp->pageName, "Electronics", 11) ||
-                         !strncasecmp(pp->pageName, "eBay: Update your contact info", 30) ||
-                         !strncasecmp(pp->pageName, "Validating JavaScript Engine", 28)) 
+                         !strncasecmp(pp->pageName, "eBay: Update your contact info", 30))
 		    ))
 			loginTime = time(NULL);
+		else if (pp->pageName &&
+			 !strncasecmp(pp->pageName, JAVAISSUE, strlen(JAVAISSUE))) {
+			loginTime = time(NULL);
+			printLog(stdout, "# Warning: Pagename \"%s\" found (Response to login).\n", pp->pageName);
+		}
 		else if (pp->pageName &&
 				(!strcmp(pp->pageName, "Welcome to eBay") ||
 				 !strcmp(pp->pageName, "Welcome to eBay - Sign in - Error") ||
