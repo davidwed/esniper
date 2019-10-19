@@ -362,29 +362,30 @@ static const char LOGIN_2_URL[] = "https://%s/signin/s";
 
 /* Parameter interpretation
  * ------------------------
- * i1        : ? (= '')
- * pageType  : ? (= '-1')
- * rqid      : <rqid from html source>
- * lkd..guid : rqid or <lkd..guid from html source>
- * mid       : <mid from globalDfpContext>
- * srt       : <srt from html source>%257Cht5new%253Dfalse%2526usid%253D<usid>
- * rtmData   : ? (= 'PS%3DT.0')
- * usid      : <session_id from globalDfpContext>
- * .         : ?
- * .         : ?
- * userid    : Your ebay username
- * pass      : Your ebay password 
- * kmsi      : Keep me signed in (= '1')
- * rdrlog    : %7B%22fp%22%3A%22%22%2C%22prfdcscmd%22%3A%22<rqid>%22%2C%22iframe%22%3Afalse%2C%22timestamp%22%3A<timestamp utc><mmm>%7D (currently empty)
+ * i1          : empty
+ * pageType    : -1
+ * srt         : <srt from html source>
+ * tagInfo     : usid%3D<usid>
+ * mid         : <mid from html source>
+ * usid        : <session_id from globalDfpContext>
+ * srt         : <srt from html source>
+ * .           : ?
+ * .           : ?
+ * rtmData     : PS%3DT.0
+ * rqid        : <rqid from html source>
+ * lkd..guid   : rqid or <lkd..guid from html source>
+ * distilReqId : < distilReqId from html source>
+ * isrecgUser  : false
+ * recgUser    : empty
+ * userid      : Your ebay username
+ * pass        : Your ebay password
  */
 
 static const char LOGIN_DATA[] = "i1=&\
 pageType=-1&\
-rqid=%s&\
-lkdhjebhsjdhejdshdjchquwekguid=%s&\
+srt=%s&\
+tagInfo=usid%3D%s&\
 mid=%s&\
-srt=%s%%257Cht5new%%253Dfalse%%2526usid%%253D%s&\
-rtmData=PS%%3DT.0&\
 usid=%s&\
 htmid=&\
 fypReset=&\
@@ -393,13 +394,19 @@ src=&\
 AppName=&\
 srcAppId=&\
 errmsg=&\
-defaultKmsi=true&\
+rtmData=PS%%3DT.0&\
+rqid=%s&\
+lkdhjebhsjdhejdshdjchquwekguid=%s&\
+distilReqId=%s&\
+isRecgUser=false&\
+recgUser=&\
 userid=%s&\
 pass=%s&\
-kmsi=1&\
-rdrlog=";
+kmsi-unchecked=1";
 
+static const char* ISSUETEXT ="## Warning: Pagename \"%s\" found (%s)\n";
 static const char* JAVAISSUE = "Validating JavaScript Engine";
+static const char* SECURITYISSUE = "Security Measure";
 
 static const char* id1="id=\"";
 static const char* id2="value=\"";
@@ -415,6 +422,7 @@ static const int MID=3;
 static const int SRT=4;
 static const int USID=5;
 static const int RUNID2=6;
+static const int DISTILREQID=7;
 
 static headerAttr_t headerAttrs[] = {"<label for=\"userid\"", 1, 1, 0, NULL,
                             "\"password\"", 1, -1, 0, NULL};
@@ -425,7 +433,8 @@ static headerVal_t headerVals[] = {"rqid", 1, 1, 1, NULL,
                            "mid", 1, 1, 1, NULL,
                            "srt", 1, 1, 1, NULL,
                            "usid", 1, 1, 1, NULL,
-                           "runId2", 1, 1, 0, NULL};
+                           "runId2", 1, 1, 0, NULL,
+			   "distilReqId", 1, 1, 0, NULL};
 
 static jsonVal_t globalDfpContext[] = {"\"mid\"", 1, 1, 1, NULL,
 			   "\"tmxSessionId\"", 1, 1, 1, NULL};
@@ -537,7 +546,6 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	int ret = 0;
 	char *password;
 	int i;	
-	int noBugReport=0;
 
 	/* negative value forces login */
 	if (loginTime > 0) {
@@ -554,31 +562,49 @@ ebayLogin(auctionInfo *aip, time_t interval)
         urlLen = sizeof(LOGIN_2_URL) + strlen(options.loginHost) - (1*placemakerLen) + 1;
         url = (char *)myMalloc(urlLen);
         sprintf(url, LOGIN_2_URL, options.loginHost);
-        mp = httpPost(url, NULL, NULL); /* Send fake login in order to get wanted html data */
+        mp = httpGet(url, NULL); /* Call the login page in order to get needed html data */
         free(url);
 
 	if (!mp)
 		return httpError(aip);
 
-	// In some cases ebay is checking for java script
-        if ((pp = getPageInfo(mp)) && !strncasecmp(pp->pageName, JAVAISSUE, strlen(JAVAISSUE))) {
-		noBugReport=1;
-		printLog(stdout, "# Warning: Pagename \"%s\" found (Response to fake login).\n", pp->pageName);
+	// In some cases ebay is checking for java script or ...
+        if ((pp = getPageInfo(mp))) {
+		if(!strncasecmp(pp->pageName, JAVAISSUE, strlen(JAVAISSUE))          ||
+		   !strncasecmp(pp->pageName, SECURITYISSUE, strlen(SECURITYISSUE))) {
+		   printLog(stdout, ISSUETEXT, pp->pageName, "Response to login initialization");
+		   freeMembuf(mp);
+		   freePageInfo(pp);
+		   sleep(5);
+		   return -1;
+		}
 	}
 
 	// Get all attributes and values needed
 	for(i = 0; i < sizeof(headerAttrs)/sizeof(headerAttr_t); i++)
-		if(findAttr(mp->memory, mp->size, &headerAttrs[i], NULL))
-			if(!noBugReport) bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
+		if(findAttr(mp->memory, mp->size, &headerAttrs[i], NULL)) {
+			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
 				"findAttr cannot find %s (headerAttrs)", headerAttrs[i].name);
+			freeMembuf(mp);
+			freePageInfo(pp);
+			return -1;
+		}
 	for(i = 0; i < sizeof(headerVals)/sizeof(headerVal_t); i++)
-		if(getVals(mp->memory, mp->size, &headerVals[i], NULL))
-			if(!noBugReport) bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
+		if(getVals(mp->memory, mp->size, &headerVals[i], NULL)) {
+			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
 				"getVals cannot find %s (headerVals)", headerVals[i].name);
+			freeMembuf(mp);
+			freePageInfo(pp);
+			return -1;
+		}
 	for(i = 0; i < sizeof(globalDfpContext)/sizeof(jsonVal_t); i++)
-                if(getJson(mp->memory, mp->size, &globalDfpContext[i], NULL))
-                        if(!noBugReport) bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
+                if(getJson(mp->memory, mp->size, &globalDfpContext[i], NULL)) {
+                        bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
                                 "getJson cannot find %s (globalDfpContext)", globalDfpContext[i].name);
+			freeMembuf(mp);
+			freePageInfo(pp);
+			return -1;
+		}
 
 	// Transfer json
 	for(i = 0; i < sizeof(transfercontent)/sizeof(transfercontent_t); i++)
@@ -595,7 +621,7 @@ ebayLogin(auctionInfo *aip, time_t interval)
 				strcpy(headerVals[transfercontent[i].dest].value, globalDfpContext[transfercontent[i].src].value);
 			}
                         if (options.debug)
-                                dlog("%s copied", headerVals[transfercontent[i].dest].value); 
+                                dlog("%s: %s copied", headerVals[transfercontent[i].dest].name, headerVals[transfercontent[i].dest].value);
 		}
 
 	freeMembuf(mp);
@@ -610,41 +636,45 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	data = (char *)myMalloc(	sizeof(LOGIN_DATA)
                                       + strlen(options.usernameEscape)
                                       + strlen(password)
-                                      + strlen(headerVals[RQID].value)
-                                      + strlen(headerVals[GUID].value)
-                                      + strlen(headerVals[MID].value)
                                       + strlen(headerVals[SRT].value)
                                       + strlen(headerVals[USID].value)
+                                      + strlen(headerVals[MID].value)
                                       + strlen(headerVals[USID].value)
-				      - (8*placemakerLen) + 1
+                                      + strlen(headerVals[RQID].value)
+                                      + strlen(headerVals[GUID].value)
+                                      + strlen(headerVals[DISTILREQID].value)
+				      - (9*placemakerLen) + 1
                                       );
 	logdata = (char *)myMalloc(	sizeof(LOGIN_DATA)
                                       + strlen(options.usernameEscape)
                                       + 5
-                                      + strlen(headerVals[RQID].value)
-                                      + strlen(headerVals[GUID].value)
-                                      + strlen(headerVals[MID].value)
                                       + strlen(headerVals[SRT].value)
                                       + strlen(headerVals[USID].value)
+                                      + strlen(headerVals[MID].value)
                                       + strlen(headerVals[USID].value)
-				      - (8*placemakerLen) + 1
+                                      + strlen(headerVals[RQID].value)
+                                      + strlen(headerVals[GUID].value)
+                                      + strlen(headerVals[DISTILREQID].value)
+				      - (9*placemakerLen) + 1
                                       );
-	sprintf(data, LOGIN_DATA,	headerVals[RQID].value,
-					headerVals[GUID].value,
+	sprintf(data, LOGIN_DATA,	headerVals[SRT].value,
+					headerVals[USID].value,
 					headerVals[MID].value,
-					headerVals[SRT].value,
 					headerVals[USID].value,
-					headerVals[USID].value,
+					headerVals[RQID].value,
+					headerVals[GUID].value,
+					headerVals[DISTILREQID].value,
 					options.usernameEscape,
 					password
 					);
 	freePassword(password);
-	sprintf(logdata, LOGIN_DATA,	headerVals[RQID].value,
-					headerVals[GUID].value,
+	sprintf(logdata, LOGIN_DATA,	headerVals[SRT].value,
+					headerVals[USID].value,
 					headerVals[MID].value,
-					headerVals[SRT].value,
 					headerVals[USID].value,
-					headerVals[USID].value,
+					headerVals[RQID].value,
+					headerVals[GUID].value,
+					headerVals[DISTILREQID].value,
 					options.usernameEscape,
 					"*****"
 					);
@@ -685,8 +715,9 @@ ebayLogin(auctionInfo *aip, time_t interval)
 			loginTime = time(NULL);
 		else if (pp->pageName &&
 			 !strncasecmp(pp->pageName, JAVAISSUE, strlen(JAVAISSUE))) {
-			loginTime = time(NULL);
-			printLog(stdout, "# Warning: Pagename \"%s\" found (Response to login).\n", pp->pageName);
+			printLog(stdout, ISSUETEXT, pp->pageName, "Response to login");
+			sleep(5);
+			ret = -1;
 		}
 		else if (pp->pageName &&
 				(!strcmp(pp->pageName, "Welcome to eBay") ||

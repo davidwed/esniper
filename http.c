@@ -144,6 +144,9 @@ httpRequest(const char *url, const char *logUrl, const char *data, const char *l
 	const char *nonNullData = data ? data : "";
 	memBuf_t *mp = (memBuf_t *)myMalloc(sizeof(memBuf_t));
 	char *metaRefresh;
+	char *metaRefreshUrl = NULL;
+	char *baseurl = NULL;
+	char *cp;
 
 	mp->memory = mp->readptr = NULL;
 	mp->size = 0;
@@ -180,6 +183,25 @@ httpRequest(const char *url, const char *logUrl, const char *data, const char *l
 
 	log(("checking for META Refresh"));
 	if ((metaRefresh = memGetMetaRefresh(mp)) != NULL) {
+		// URL is relative
+		if ( metaRefresh[0] == '/' ) {
+			cp = strstr(url, "://");
+			if( cp && (cp = strchr(cp + 3, '/')) ) {
+				baseurl = (char*) myMalloc( cp - url + 1);
+				memset(baseurl, '\0', cp - url + 1);
+				strncpy(baseurl, url, cp - url);
+			} else {
+				baseurl = (char*) myMalloc( strlen(url) + 1);
+				memset(baseurl, '\0', strlen(url) + 1);
+				strncpy(baseurl, url, strlen(url));
+			}
+			metaRefreshUrl = (char*) myMalloc(strlen(metaRefresh) + 1);
+			strncpy(metaRefreshUrl, metaRefresh, strlen(metaRefresh));
+			metaRefresh = myMalloc( strlen(baseurl) + strlen(metaRefreshUrl) + 1);
+			sprintf(metaRefresh, "%s%s\0", baseurl, metaRefreshUrl);
+			free(metaRefreshUrl);
+			free(baseurl);
+		}
 		log(("page redirection by META Refresh: %s\n", metaRefresh));
 		freeMembuf(mp);
 		return httpGet(metaRefresh, NULL);
@@ -246,8 +268,6 @@ initCurlStuff(void)
 	if ((curlrc = curl_easy_setopt(easyhandle, CURLOPT_USERAGENT, "Mozilla/4.7 [en] (X11; U; Linux 2.2.12 i686)")))
 		return initCurlStuffFailed();
 
-	/* some servers don't like requests that are made without a user-agent
-	 * field, so we provide one */
 	if ((curlrc = curl_easy_setopt(easyhandle, CURLOPT_COOKIEFILE, "")))
 		return initCurlStuffFailed();
 
