@@ -323,7 +323,7 @@ compareAuctionInfo(const void *p1, const void *p2)
 	if (!strcmp(a1->auction, a2->auction))
 		return 0;
 	/* Currently winning bids go first */
-	if (a1->winning != a2->winning)
+	if (options.winprior && a1->winning != a2->winning)
 		return a1->winning > a2->winning ? -1 : 1;
 	/* if end time is the same we compare the current price
 	 * and use the lower price first
