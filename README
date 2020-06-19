@@ -1,3 +1,9 @@
+# esniper legacy branch
+#
+# To clone this branch, use the following git command:
+# git clone git://git.code.sf.net/p/esniper/git -b legacy esniper-git-legacy
+#
+
 2018-06-17
 	* 2.35.0 released
 	* bug fixes for #757, #756, #746, #737, #736, #733, #725,
