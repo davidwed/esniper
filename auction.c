@@ -411,6 +411,8 @@ static const char LOGIN_DATA[] = "rqid=%s&lkdhjebhsjdhejdshdjchquwekguid=%s&refI
 static const char* id="id=\"";
 static const char* id2="value=\"";
 
+static const int CANCEL_URL=0;
+
 static const int USER_NUM=0;
 static const int PASS_NUM=1;
 
@@ -655,6 +657,12 @@ ebayLogin(auctionInfo *aip, time_t interval)
                          !strncasecmp(pp->pageName, "eBay: Update your contact info", 30)) 
 		    ))
 			loginTime = time(NULL);
+		else if (pp->pageName &&
+				!strcmp(pp->pageName, "Confirm your account")) {
+			/* Just ignore this page and continue ... */
+			printf("Warning: Page \"Confirm your account\" ignored\n");
+			loginTime = time(NULL);
+		}
 		else if (pp->pageName &&
 				(!strcmp(pp->pageName, "Welcome to eBay") ||
 				 !strcmp(pp->pageName, "Welcome to eBay - Sign in - Error") ||
