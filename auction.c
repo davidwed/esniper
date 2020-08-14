@@ -411,8 +411,6 @@ static const char LOGIN_DATA[] = "rqid=%s&lkdhjebhsjdhejdshdjchquwekguid=%s&refI
 static const char* id="id=\"";
 static const char* id2="value=\"";
 
-static const int CANCEL_URL=0;
-
 static const int USER_NUM=0;
 static const int PASS_NUM=1;
 
@@ -423,6 +421,12 @@ static const int MID=3;
 static const int SRT=4;
 static const int USID=5;
 static const int RUNID2=6;
+
+static const char* ES_ERROR_FORMAT="*** Error: Page \"%s\". Cannot continue. ***\n";
+static const char* ES_WARNING_FORMAT="*** Warning: Page \"%s\". Skipping page. ***\n";
+
+static const char* ES_ERROR_VERIFY="Please enter the verification code";
+static const char* ES_ERROR_LIMIT="Daily limit exceeded";
 
 static headerAttr_t headerAttrs[] = {"<label for=\"userid\"", 1, 1, 1, NULL,
                             "\"password\"", 1, -1, 1, NULL};
@@ -473,7 +477,7 @@ signinFormSearch(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t
 			searchdef->value = (char *)myMalloc(strlen(res) + 1);
 			strncpy(searchdef->value, (char*) &res, strlen(res) + 1);
 			if (options.debug)
-				dlog("%s(): %s=%s", (searchfor == st_attribute ? "findAttr" : "searchvalue"), 
+				dlog("%s(): %s=%s", (searchfor == st_attribute ? "findAttr" : "getVals"), 
 					searchdef->name, searchdef->value);
 			return 0;
 		}
@@ -549,15 +553,30 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	if (!mp)
 		return httpError(aip);
 
+	// Some early checks
+	if ((pp = getPageInfo(mp))) {
+		if (pp->pageName &&
+			(!strcmp(pp->pageName, ES_ERROR_LIMIT))) {
+			// Cannot continue ...
+			printLog(stdout, ES_ERROR_FORMAT, pp->pageName);
+			exit(0);
+		}
+		freePageInfo(pp);
+	}
+
 	// Get all attributes and values needed
 	for(i = 0; i < sizeof(headerAttrs)/sizeof(headerAttr_t); i++)
-		if(findAttr(mp->memory, mp->size, &headerAttrs[i]))
+		if(findAttr(mp->memory, mp->size, &headerAttrs[i])) {
 			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
 				"findAttr cannot find %s", headerAttrs[i].name);
+			exit(0);
+		}
 	for(i = 0; i < sizeof(headerVals)/sizeof(headerVal_t); i++)
-		if(getVals(mp->memory, mp->size, &headerVals[i]))
+		if(getVals(mp->memory, mp->size, &headerVals[i])) {
 			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
 				"getVals cannot find %s", headerVals[i].name);
+			exit(0);
+		}
 
 	freeMembuf(mp);
 	mp = NULL;
@@ -645,7 +664,7 @@ ebayLogin(auctionInfo *aip, time_t interval)
 		 * naming of MyeBay pages (MyeBay, MyEbay, myebay, ...) so
 		 * esniper must use strncasecmp().
 		 */
-		if ((pp->srcId && !strcmp(pp->srcId, "SignInAlertSupressor"))||
+		if ((pp->srcId && !strcmp(pp->srcId, "SignInAlertSupressor")) ||
 		    (pp->pageName &&
 			(!strncasecmp(pp->pageName, "MyeBay", 6) ||
 			 !strncasecmp(pp->pageName, "My eBay", 7) ||
@@ -659,9 +678,16 @@ ebayLogin(auctionInfo *aip, time_t interval)
 			loginTime = time(NULL);
 		else if (pp->pageName &&
 				!strcmp(pp->pageName, "Confirm your account")) {
-			/* Just ignore this page and continue ... */
-			printf("Warning: Page \"Confirm your account\" ignored\n");
+			// Just ignore this page and continue ...
+			printLog(stdout, ES_WARNING_FORMAT, pp->pageName);
 			loginTime = time(NULL);
+		}
+		else if (pp->pageName &&
+				(!strcmp(pp->pageName, ES_ERROR_VERIFY) ||
+				 !strcmp(pp->pageName, ES_ERROR_LIMIT))) {
+			// Cannot continue ...
+			printLog(stdout, ES_ERROR_FORMAT, pp->pageName);
+			exit(0);
 		}
 		else if (pp->pageName &&
 				(!strcmp(pp->pageName, "Welcome to eBay") ||
