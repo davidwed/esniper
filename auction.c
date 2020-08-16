@@ -362,85 +362,75 @@ static const char LOGIN_2_URL[] = "https://%s/signin/s";
 
 /* Parameter interpretation
  * ------------------------
- * i1          : empty
- * pageType    : -1
- * srt         : <srt from html source>
- * tagInfo     : usid%3D<usid>
- * mid         : <mid from html source>
- * usid        : <session_id from globalDfpContext>
- * srt         : <srt from html source>
- * .           : ?
- * .           : ?
- * rtmData     : PS%3DT.0
- * rqid        : <rqid from html source>
- * lkd..guid   : rqid or <lkd..guid from html source>
- * distilReqId : < distilReqId from html source>
- * isrecgUser  : false
- * recgUser    : empty
  * userid      : Your ebay username
  * pass        : Your ebay password
+ * .
+ * srt         : <srt from html source>
+ * .
+ * rqid        : <rqid from html source>
+ * lkd..guid   : rqid or <lkd..guid from html source>
+ * recgUser    : Your ebay username
+ * lastAttemptMethod : password
+ * isRecgUser  : true
  */
 
-static const char LOGIN_DATA[] = "i1=&\
+static const char LOGIN_DATA[] = "\
+userid=%s&\
+pass=%s&\
+kmsi-unchecked=1&\
+kmsi=1&\
 pageType=-1&\
 srt=%s&\
-tagInfo=usid%3D%s&\
-mid=%s&\
-usid=%s&\
-htmid=&\
-fypReset=&\
-ICurl=&\
-src=&\
-AppName=&\
-srcAppId=&\
-errmsg=&\
 rtmData=PS%%3DT.0&\
 rqid=%s&\
 lkdhjebhsjdhejdshdjchquwekguid=%s&\
-distilReqId=%s&\
-isRecgUser=false&\
-recgUser=&\
-userid=%s&\
-pass=%s&\
-kmsi-unchecked=1";
+recgUser=%s\
+lastAttemptMethod=password&\
+mid=%s&\
+isRecgUser=true";
 
-static const char* ISSUETEXT ="## Warning: Pagename \"%s\" found (%s)\n";
-static const char* JAVAISSUE = "Validating JavaScript Engine";
-static const char* SECURITYISSUE = "Security Measure";
+static const char* ES_ERROR_FORMAT="*** Error: Page \"%s\". Cannot continue. ***\n";
+static const char* ES_WARNING_FORMAT="*** Warning: Page \"%s\". Skipping page. ***\n";
+
+static const char* ES_ERROR_VERIFY="Please enter the verification code";
+static const char* ES_ERROR_LIMIT="Daily limit exceeded";
+static const char* ES_ERROR_JAVA="Validating JavaScript Engine";
+static const char* ES_ERROR_SECURITY="Security Measure";
 
 static const char* id1="id=\"";
 static const char* id2="value=\"";
 static const char* id3=":\"";
 
-static const int USER_NUM=0;
-static const int PASS_NUM=1;
+static char JNULL[]="\0";
+static char JDFPMID[]="\"dfpmid\"";
+static char JMID[]="\\\"mid\\\"";
+static char JRQID[]="\"rqid\"";
+static char JLKDH[]="\"lkdhjebhsjdhejdshdjchquwekguid\"";
+static char JSRT[]="\"srt\"";
 
-static const int RQID=0;
-static const int GUID=1;
-static const int REGURL=2;
-static const int MID=3;
-static const int SRT=4;
-static const int USID=5;
-static const int RUNID2=6;
-static const int DISTILREQID=7;
+static headerAttr_t headerAttrs[] = {};		// no longer used
 
-static headerAttr_t headerAttrs[] = {"<label for=\"userid\"", 1, 1, 0, NULL,
-                            "\"password\"", 1, -1, 0, NULL};
+static headerVal_t headerVals[] = {};		// no longer used
 
-static headerVal_t headerVals[] = {"rqid", 1, 1, 1, NULL,
-                           "lkdhjebhsjdhejdshdjchquwekguid", 1, 1, 1, NULL,
-                           "regUrl", 1, 1, 0, NULL,
-                           "mid", 1, 1, 1, NULL,
-                           "srt", 1, 1, 1, NULL,
-                           "usid", 1, 1, 1, NULL,
-                           "runId2", 1, 1, 0, NULL,
-			   "distilReqId", 1, 1, 0, NULL};
+static jsonVal_t globalDfpContext[] = {
+			JDFPMID, 1, 1, 1, NULL,
+			JMID, 1, 1, 1, NULL,
+			JRQID, 1, 1, 1, NULL,
+			JLKDH, 1, 1, 1, NULL,
+			JSRT, 1, 1, 1, NULL};
 
-static jsonVal_t globalDfpContext[] = {"\"mid\"", 1, 1, 1, NULL,
-			   "\"tmxSessionId\"", 1, 1, 1, NULL};
+static transfercontent_t transfercontent[] = {};	// no longer used
 
-static transfercontent_t transfercontent[] = { 3, 0, 1,
-			   5, 1, 0};
+static char*
+getHtmlVal(headerAttr_t* searchdef, size_t size, const char* keyval)
+{
+	for(int i=0; i<size; i++)
+	{
+		if(!strcmp(searchdef[i].name, keyval)) return searchdef[i].value;
+	}
+
+	return JNULL;
+}
 
 static int
 parseHtmlSource(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t searchfor, char* label)
@@ -482,7 +472,7 @@ parseHtmlSource(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t 
 			searchdef->value = (char *)myMalloc(strlen(res) + 1);
 			strncpy(searchdef->value, (char*) &res, strlen(res) + 1);
 			if (options.debug)
-				dlog("%s(): %s=%s", (label != NULL ? label : (searchfor == st_attribute ? "findAttr" : "searchvalue")), 
+				dlog("%s(): %s=%s", (label != NULL ? label : (searchfor == st_attribute ? "findAttr" : (searchfor == st_value ? "getVals": "getJson"))), 
 					searchdef->name, searchdef->value);
 			return 0;
 		}
@@ -493,7 +483,7 @@ parseHtmlSource(char* src, size_t srcLen, headerAttr_t* searchdef, searchType_t 
             searchdef->value = (char *)myMalloc(1);
             strncpy(searchdef->value, "\0", 1);
             if (options.debug)
-               dlog("%s(): %s=%s", (label != NULL ? label : (searchfor == st_attribute ? "findAttr" : "searchvalue")),
+               dlog("%s(): %s=%s", (label != NULL ? label : (searchfor == st_attribute ? "findAttr" : (searchfor == st_value ? "getVals": "getJson"))),
                        searchdef->name, searchdef->value);
             return searchdef->mandatory;
         }
@@ -569,15 +559,12 @@ ebayLogin(auctionInfo *aip, time_t interval)
 		return httpError(aip);
 
 	// In some cases ebay is checking for java script or ...
-        if ((pp = getPageInfo(mp))) {
-		if(!strncasecmp(pp->pageName, JAVAISSUE, strlen(JAVAISSUE))          ||
-		   !strncasecmp(pp->pageName, SECURITYISSUE, strlen(SECURITYISSUE))) {
-		   printLog(stdout, ISSUETEXT, pp->pageName, "Response to login initialization");
-		   freeMembuf(mp);
-		   freePageInfo(pp);
-		   sleep(5);
-		   return -1;
-		}
+        if ((pp = getPageInfo(mp)) && 
+		(!strcasecmp(pp->pageName, ES_ERROR_JAVA)     ||
+		 !strcasecmp(pp->pageName, ES_ERROR_SECURITY) ||
+		 !strcasecmp(pp->pageName, ES_ERROR_LIMIT))) {
+		 printLog(stdout, ES_ERROR_FORMAT, pp->pageName);
+		 exit(0);
 	}
 
 	// Get all attributes and values needed
@@ -585,25 +572,19 @@ ebayLogin(auctionInfo *aip, time_t interval)
 		if(findAttr(mp->memory, mp->size, &headerAttrs[i], NULL)) {
 			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
 				"findAttr cannot find %s (headerAttrs)", headerAttrs[i].name);
-			freeMembuf(mp);
-			freePageInfo(pp);
-			return -1;
+			exit(0);
 		}
 	for(i = 0; i < sizeof(headerVals)/sizeof(headerVal_t); i++)
 		if(getVals(mp->memory, mp->size, &headerVals[i], NULL)) {
 			bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
 				"getVals cannot find %s (headerVals)", headerVals[i].name);
-			freeMembuf(mp);
-			freePageInfo(pp);
-			return -1;
+			exit(0);
 		}
 	for(i = 0; i < sizeof(globalDfpContext)/sizeof(jsonVal_t); i++)
                 if(getJson(mp->memory, mp->size, &globalDfpContext[i], NULL)) {
                         bugReport("ebayLogin", __FILE__, __LINE__, aip, mp, optiontab,
                                 "getJson cannot find %s (globalDfpContext)", globalDfpContext[i].name);
-			freeMembuf(mp);
-			freePageInfo(pp);
-			return -1;
+			exit(0);
 		}
 
 	// Transfer json
@@ -636,48 +617,38 @@ ebayLogin(auctionInfo *aip, time_t interval)
 	data = (char *)myMalloc(	sizeof(LOGIN_DATA)
                                       + strlen(options.usernameEscape)
                                       + strlen(password)
-                                      + strlen(headerVals[SRT].value)
-                                      + strlen(headerVals[USID].value)
-                                      + strlen(headerVals[MID].value)
-                                      + strlen(headerVals[USID].value)
-                                      + strlen(headerVals[RQID].value)
-                                      + strlen(headerVals[GUID].value)
-                                      + strlen(headerVals[DISTILREQID].value)
-				      - (9*placemakerLen) + 1
+                                      + strlen(getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JSRT))
+                                      + strlen(getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JRQID))
+                                      + strlen(getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JLKDH))
+                                      + strlen(options.usernameEscape)
+                                      + strlen(getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JDFPMID))
+				      - (6*placemakerLen) + 1
                                       );
 	logdata = (char *)myMalloc(	sizeof(LOGIN_DATA)
-                                      + strlen(options.usernameEscape)
                                       + 5
-                                      + strlen(headerVals[SRT].value)
-                                      + strlen(headerVals[USID].value)
-                                      + strlen(headerVals[MID].value)
-                                      + strlen(headerVals[USID].value)
-                                      + strlen(headerVals[RQID].value)
-                                      + strlen(headerVals[GUID].value)
-                                      + strlen(headerVals[DISTILREQID].value)
-				      - (9*placemakerLen) + 1
+                                      + strlen(options.usernameEscape)
+                                      + strlen(getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JSRT))
+                                      + strlen(getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JRQID))
+                                      + strlen(getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JLKDH))
+                                      + strlen(options.usernameEscape)
+                                      + strlen(getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JDFPMID))
+				      - (6*placemakerLen) + 1
                                       );
-	sprintf(data, LOGIN_DATA,	headerVals[SRT].value,
-					headerVals[USID].value,
-					headerVals[MID].value,
-					headerVals[USID].value,
-					headerVals[RQID].value,
-					headerVals[GUID].value,
-					headerVals[DISTILREQID].value,
+	sprintf(data, LOGIN_DATA,	options.usernameEscape,
+					password,
+					getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JSRT),
+					getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JRQID),
+					getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JLKDH),
 					options.usernameEscape,
-					password
-					);
+					getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JDFPMID));
 	freePassword(password);
-	sprintf(logdata, LOGIN_DATA,	headerVals[SRT].value,
-					headerVals[USID].value,
-					headerVals[MID].value,
-					headerVals[USID].value,
-					headerVals[RQID].value,
-					headerVals[GUID].value,
-					headerVals[DISTILREQID].value,
+	sprintf(logdata, LOGIN_DATA,	options.usernameEscape,
+					"*****",
+					getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JSRT),
+					getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JRQID),
+					getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JLKDH),
 					options.usernameEscape,
-					"*****"
-					);
+					getHtmlVal(globalDfpContext, sizeof(globalDfpContext)/sizeof(jsonVal_t), JDFPMID));
 
 	// Using POST method instead of GET
 	mp = httpPost(url, data, logdata);
@@ -714,10 +685,11 @@ ebayLogin(auctionInfo *aip, time_t interval)
 		    ))
 			loginTime = time(NULL);
 		else if (pp->pageName &&
-			 !strncasecmp(pp->pageName, JAVAISSUE, strlen(JAVAISSUE))) {
-			printLog(stdout, ISSUETEXT, pp->pageName, "Response to login");
-			sleep(5);
-			ret = -1;
+			(!strcasecmp(pp->pageName, ES_ERROR_JAVA)     ||
+			 !strcasecmp(pp->pageName, ES_ERROR_SECURITY) ||
+			 !strcasecmp(pp->pageName, ES_ERROR_LIMIT))) {
+			printLog(stdout, ES_ERROR_FORMAT, pp->pageName);	
+			exit(0);
 		}
 		else if (pp->pageName &&
 				(!strcmp(pp->pageName, "Welcome to eBay") ||
